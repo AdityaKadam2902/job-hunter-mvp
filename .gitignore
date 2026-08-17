@@ -13,6 +13,9 @@ __pycache__/
 *.py[cod]
 *.pyo
 
+# Test cache
+.pytest_cache/
+
 # IDE
 .vscode/
 .idea/
@@ -24,5 +27,11 @@ Thumbs.db
 # Logs
 *.log
 
-# Local resume files
-resumes/
+# Local resume files (personal/PII, and regenerable via resume_ingest.py)
+resumes/*
+
+# Personal eval labeling data — your own relevance judgments, regenerated
+# fresh by app.match each run. Not secret, just not meaningful to anyone
+# else's repo checkout, and it'll change every time you re-run matching.
+eval/predictions.csv
+eval/predictions_autolabel_backup.csv

@@ -4,15 +4,26 @@ Run with: python -m app.match
 Pulls your active resume, compares its embedding against every stored job
 via pgvector cosine similarity, layers on the deterministic keyword +
 seniority rubric from scoring.py, and prints a ranked, explainable list.
-
-This is deliberately a script, not a web UI yet — the point of step 3 is to
-prove the matching logic itself works before building anything on top of it.
+Also writes the full scored candidate list to eval/predictions.csv so it
+can be labeled for the eval harness (see app/eval.py).
 """
 
+import csv
+from pathlib import Path
+
 from app.db import get_raw_conn
-from app.scoring import extract_resume_skills, final_score, keyword_overlap_score, matched_skills, seniority_fit_score
+from app.scoring import (
+    ai_specificity_score,
+    domain_fit_score,
+    extract_resume_skills,
+    final_score,
+    keyword_overlap_score,
+    matched_skills,
+    seniority_fit_score,
+)
 
 TOP_N = 20
+EVAL_DIR = Path("eval")
 
 
 def get_active_resume(conn):
@@ -85,16 +96,38 @@ def main() -> None:
             job_text = f"{job['title']} {job['description'] or ''}"
             kw_score = keyword_overlap_score(resume_skills, job_text)
             sen_score = seniority_fit_score(job["seniority"])
-            score = final_score(job["similarity"], kw_score, sen_score)
-            scored.append({**job, "keyword_score": kw_score, "seniority_score": sen_score, "final_score": score})
+            dom_score = domain_fit_score(job["title"])
+            ai_score = ai_specificity_score(job["title"], job["description"] or "")
+            score = final_score(job["similarity"], kw_score, sen_score, dom_score, ai_score)
+            scored.append({**job, "keyword_score": kw_score, "seniority_score": sen_score,
+                            "domain_score": dom_score, "ai_specificity": ai_score, "final_score": score})
 
         scored.sort(key=lambda j: j["final_score"], reverse=True)
+
+        EVAL_DIR.mkdir(exist_ok=True)
+        csv_path = EVAL_DIR / "predictions.csv"
+        with open(csv_path, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            writer.writerow(["rank", "job_id", "company", "title", "seniority", "final_score",
+                              "similarity", "keyword_score", "seniority_score", "domain_score",
+                              "ai_specificity", "url", "relevant"])
+            for i, job in enumerate(scored, start=1):
+                # 'relevant' column left blank on purpose — you fill in 1 or 0
+                # by hand after reviewing each listing. That's the eval harness.
+                writer.writerow([i, job["id"], job["company"], job["title"], job["seniority"],
+                                  f"{job['final_score']:.3f}", f"{job['similarity']:.3f}",
+                                  f"{job['keyword_score']:.3f}", f"{job['seniority_score']:.3f}",
+                                  f"{job['domain_score']:.3f}", f"{job['ai_specificity']:.3f}",
+                                  job["url"], ""])
+        print(f"Full ranked list ({len(scored)} jobs) written to {csv_path}\n")
 
         print(f"Top {TOP_N} matches (of {len(candidates)} candidates considered):\n")
         for i, job in enumerate(scored[:TOP_N], start=1):
             matches = matched_skills(resume_skills, f"{job['title']} {job['description'] or ''}")
             print(f"{i}. [{job['final_score']:.2f}] {job['title']} — {job['company']} ({job['seniority']})")
-            print(f"   similarity={job['similarity']:.2f}  keyword_overlap={job['keyword_score']:.2f}  seniority_fit={job['seniority_score']:.2f}")
+            print(f"   similarity={job['similarity']:.2f}  keyword_overlap={job['keyword_score']:.2f}  "
+                  f"seniority_fit={job['seniority_score']:.2f}  domain_fit={job['domain_score']:.2f}  "
+                  f"ai_specificity={job['ai_specificity']:.2f}")
             if matches:
                 print(f"   matched skills: {', '.join(matches)}")
             print(f"   {job['url']}\n")

@@ -20,14 +20,83 @@ FALLBACK_SKILL_VOCAB = [
     "machine learning", "llm", "rag",
 ]
 
-# Entry-level candidate: entry-tagged roles are the best fit, senior roles
-# are a real stretch. Adjust these weights as your actual experience grows.
+# You're a fresher with ~1 year of internship experience — senior roles are
+# a genuine long shot, not just a "stretch." This value was softened to
+# 0.35 earlier based on a small labeled sample where you marked a few
+# senior roles relevant, but your direct, explicit correction here is a
+# stronger signal than 9-19 sparse labels. Locked at 0.2: senior roles can
+# still surface if everything else about them is an exceptional match, but
+# they won't casually outrank realistic entry/mid roles anymore.
 SENIORITY_FIT = {
     "entry": 1.0,
-    "mid": 0.6,
-    "unknown": 0.5,
-    "senior": 0.15,
+    "mid": 0.7,
+    "unknown": 0.55,
+    "senior": 0.2,
 }
+
+# Titles containing these are almost always a different functional domain
+# than hands-on AI/ML engineering, even when the description mentions AI
+# buzzwords in passing (e.g. "Applied AI Enablement, Legal" matches "RAG"
+# as a keyword but is a legal/compliance role, not an engineering one).
+# This is what actually separates "senior stretch role I still want to see"
+# from "wrong field entirely" — two things the old rubric conflated.
+OFF_DOMAIN_TITLE_MARKERS = [
+    "legal", "compliance", "recruiting", "talent acquisition", "hr ",
+    "human resources", "sales", "account executive", "marketing",
+    "finance", "accounting", "growth", "customer success",
+    "business development", "sales engineer",
+]
+
+
+def domain_fit_score(title: str) -> float:
+    """1.0 if the role looks like it's in your actual field (hands-on
+    engineering/ML/product-technical), penalized hard if the title signals
+    a different department entirely — regardless of how many AI keywords
+    the description happens to mention."""
+    title_lower = title.lower()
+    if any(marker in title_lower for marker in OFF_DOMAIN_TITLE_MARKERS):
+        return 0.1
+    return 1.0
+
+
+# Distinguishes CORE AI/ML roles from generic software engineering roles
+# that happen to exist at an AI company. Your originally scoped target was
+# "AI/ML Engineer roles specifically" — not broad SWE — so a Backend
+# Engineer or DevOps role at Abnormal shouldn't rank the same as an actual
+# ML Engineer role there, even though both pass the domain_fit check above.
+AI_SPECIFIC_MARKERS = [
+    "machine learning", "ml engineer", " ai ", "ai engineer", "genai",
+    "generative ai", "applied scientist", "research scientist",
+    "data scientist", "nlp", "computer vision", "deep learning",
+    "llm", "artificial intelligence",
+]
+# Generic technical titles that are NOT AI-specific, even at an AI company —
+# deprioritized relative to core AI/ML roles, but not excluded (still real
+# engineering work you could plausibly do).
+GENERIC_SWE_TITLE_MARKERS = [
+    "backend", "front end", "frontend", "devops", "site reliability",
+    "systems engineer", "platform engineer", "integration engineer",
+    "qa engineer", "security engineer", "infrastructure",
+]
+
+
+def ai_specificity_score(title: str, description: str) -> float:
+    """1.0 for core AI/ML roles, 0.5 for generic SWE roles at an AI company
+    (real work, just not your primary target), 0.75 for anything ambiguous.
+
+    TITLE ONLY, deliberately — description is unreliable here. Companies
+    like Abnormal, Hive, and Wayve mention 'AI' in their company boilerplate
+    on EVERY job posting regardless of role, so checking description text
+    made a DevOps or Backend role at an AI company score identically to an
+    actual ML Engineer role. `description` param is kept for future use but
+    intentionally unused right now."""
+    title_lower = f" {title.lower()} "  # padded so ' ai ' matches even at start/end of title
+
+    if any(marker in title_lower for marker in AI_SPECIFIC_MARKERS):
+        return 1.0
+    if any(marker in title_lower for marker in GENERIC_SWE_TITLE_MARKERS):
+        return 0.5
+    return 0.75
 
 _SECTION_HEADING = re.compile(
     r"(?im)^\s*(technical\s+skills|skills\s*&?\s*tools|skills|technologies|tech\s+stack)\s*:?\s*$"
@@ -66,31 +135,50 @@ def extract_resume_skills(resume_text: str) -> set[str]:
     return {s for s in FALLBACK_SKILL_VOCAB if s in resume_lower}
 
 
-def keyword_overlap_score(resume_skills: set[str], job_text: str) -> float:
-    """Fraction of the resume's own extracted skills that appear in the job
-    text. Transparent on purpose — matched_skills() below shows exactly
-    which ones matched."""
+import re as _re
+
+
+def _contains_skill(skill: str, text_lower: str) -> bool:
+    """Whole-word/phrase match, not plain substring containment. Plain `in`
+    checks let short skill terms falsely match inside unrelated words —
+    e.g. 'agno' was matching inside 'diagnostics', inflating scores on
+    completely unrelated jobs. \\b handles both single words and
+    multi-word phrases like 'computer vision' correctly."""
+    pattern = r"\b" + _re.escape(skill) + r"\b"
+    return _re.search(pattern, text_lower) is not None
+
+
+def keyword_overlap_score(resume_skills: set[str], job_text: str, saturation: int = 6) -> float:
+    """Score based on ABSOLUTE count of matched skills, capped at
+    `saturation`, not the fraction of your total resume vocabulary.
+
+    Why: fraction-of-total punishes a deep, specific skillset. If your
+    resume has 51 real extracted skills and a job matches 7 of them,
+    that's a genuinely strong match — but 7/51 = 0.14 makes it look weak.
+    Matching 6+ real skills on any single job posting is already an
+    excellent signal regardless of how large your total skillset is."""
     if not resume_skills:
         return 0.0
     job_lower = job_text.lower()
-    matched = {s for s in resume_skills if s in job_lower}
-    return len(matched) / len(resume_skills)
+    matched_count = sum(1 for s in resume_skills if _contains_skill(s, job_lower))
+    return min(1.0, matched_count / saturation)
 
 
 def matched_skills(resume_skills: set[str], job_text: str) -> list[str]:
     job_lower = job_text.lower()
-    return sorted(s for s in resume_skills if s in job_lower)
+    return sorted(s for s in resume_skills if _contains_skill(s, job_lower))
 
 
 def seniority_fit_score(seniority: str) -> float:
     return SENIORITY_FIT.get(seniority, 0.5)
 
 
-def final_score(similarity: float, keyword_score: float, seniority_score: float) -> float:
-    """Weighted combination. Similarity carries the most weight since it
-    captures semantic fit beyond exact keyword matches; keyword overlap is
-    weighted second-highest since a real skill match is strong relevance
-    signal. Seniority fit is intentionally the smallest weight — it's a
-    tiebreaker, not something that should let a completely unrelated
-    'entry-tagged' role outrank a genuinely skill-matched one."""
-    return (0.5 * similarity) + (0.4 * keyword_score) + (0.1 * seniority_score)
+def final_score(similarity: float, keyword_score: float, seniority_score: float,
+                 domain_score: float, ai_specificity: float) -> float:
+    """Weighted combination. Seniority fit weight raised from 0.1 to 0.15 —
+    with the value itself also lowered for senior roles, this makes
+    seniority a genuinely decisive factor, matching the explicit correction
+    that senior roles are a long shot for a fresher, not just a mild
+    deprioritization."""
+    return ((0.3 * similarity) + (0.3 * keyword_score) + (0.15 * seniority_score)
+            + (0.15 * domain_score) + (0.1 * ai_specificity))

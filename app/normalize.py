@@ -23,6 +23,7 @@ class JobRecord(BaseModel):
     def finalize(self) -> "JobRecord":
         """Fill in derived fields. Call after construction."""
         self.seniority = classify_seniority(self.title, self.description or "")
+        self.engagement_type = classify_engagement_type(self.title, self.description or "")
         self.content_hash = make_content_hash(self.company, self.title, self.description or "")
         return self
 
@@ -35,6 +36,7 @@ class JobRecord(BaseModel):
 _SENIOR_PATTERNS = re.compile(
     r"\b(senior|sr\.?|staff|principal|lead|architect|director|head of)\b", re.I
 )
+_MANAGEMENT_TITLE = re.compile(r"\b(manager|head)\b", re.I)
 _ENTRY_PATTERNS = re.compile(
     r"\b(intern|internship|entry.level|entry level|new grad|graduate|junior|jr\.?|"
     r"0-2 years|0-1 year)\b",
@@ -45,13 +47,43 @@ _ENTRY_PATTERNS = re.compile(
 # junior engineering roles, which was pushing irrelevant jobs to the top of
 # the ranked list purely on a seniority-tag false positive.
 
+_FREELANCE_PATTERNS = re.compile(
+    r"\b(freelance|freelancer)\b", re.I
+)
+_CONTRACT_PATTERNS = re.compile(
+    r"\b(contract|contractor|contract-to-hire|c2h|\d+\s*month[s]?\s*contract|"
+    r"fixed.term|temporary|temp\b)\b", re.I
+)
+
+
+def classify_engagement_type(title: str, description: str) -> str:
+    """Was previously hardcoded to always return 'full_time' — a real gap
+    flagged once RemoteOK started surfacing genuine freelance/contract
+    listings (e.g. 'LLM Engineer Freelancer', 'Software Integration
+    Engineer (6 months Contract)') that were silently scored as if they
+    were full-time roles. Checks title primarily — same lesson as the
+    seniority/domain classifiers: title is a more reliable signal than
+    description text, which often mentions unrelated contract terms
+    (benefits, legal boilerplate) regardless of the role's actual type."""
+    if _FREELANCE_PATTERNS.search(title):
+        return "freelance"
+    if _CONTRACT_PATTERNS.search(title):
+        return "contract"
+    return "full_time"
+
 
 def classify_seniority(title: str, description: str) -> str:
-    text = f"{title} {description}"
     if _SENIOR_PATTERNS.search(title):
         # trust the title over the description for senior signal —
         # descriptions often mention "mentor senior engineers" etc.
         return "senior"
+    if _MANAGEMENT_TITLE.search(title):
+        # A "Manager" or "Head of X" title is never entry-level, regardless
+        # of what wording the description happens to use. Treat as at least
+        # mid rather than let entry-pattern text hits override the title.
+        return "mid"
+
+    text = f"{title} {description}"
     if _ENTRY_PATTERNS.search(text):
         return "entry"
     if _SENIOR_PATTERNS.search(text):

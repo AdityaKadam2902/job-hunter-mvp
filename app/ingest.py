@@ -8,8 +8,8 @@ Deliberately re-runnable: run this daily and it'll only do embedding work
 (the expensive-ish step) on genuinely new postings.
 """
 
-from app.companies import GREENHOUSE_COMPANIES, LEVER_COMPANIES
-from app.connectors import greenhouse, lever
+from app.companies import ASHBY_COMPANIES, GREENHOUSE_COMPANIES, LEVER_COMPANIES, REMOTEOK_TAGS, WORKDAY_COMPANIES
+from app.connectors import ashby, greenhouse, lever, remoteok, workday
 from app.db import get_raw_conn
 from app.embeddings import embed_text
 from app.normalize import JobRecord, utcnow
@@ -26,6 +26,21 @@ def fetch_all() -> list[JobRecord]:
     for slug in LEVER_COMPANIES:
         jobs = lever.fetch_jobs(slug)
         print(f"[lever] {slug}: {len(jobs)} jobs")
+        records.extend(jobs)
+
+    for tag in REMOTEOK_TAGS:
+        jobs = remoteok.fetch_jobs(tag)
+        print(f"[remoteok] tag '{tag}': {len(jobs)} jobs")
+        records.extend(jobs)
+
+    for slug in ASHBY_COMPANIES:
+        jobs = ashby.fetch_jobs(slug)
+        print(f"[ashby] {slug}: {len(jobs)} jobs")
+        records.extend(jobs)
+
+    for tenant, wd_server, site, display_name in WORKDAY_COMPANIES:
+        jobs = workday.fetch_jobs(tenant, wd_server, site, display_name)
+        print(f"[workday] {display_name}: {len(jobs)} jobs")
         records.extend(jobs)
 
     return records
