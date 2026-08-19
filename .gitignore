@@ -35,3 +35,6 @@ resumes/*
 # else's repo checkout, and it'll change every time you re-run matching.
 eval/predictions.csv
 eval/predictions_autolabel_backup.csv
+
+# Daily scheduled run logs
+logs/*
