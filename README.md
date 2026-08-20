@@ -87,6 +87,17 @@ push, so a future edit that reintroduces one of these bugs fails a check
 immediately instead of shipping silently and needing to be re-discovered
 by eye, the way each one originally was.
 
+## Scheduled daily runs
+
+Postgres and Ollama are both local, so this runs via **Windows Task
+Scheduler**, not GitHub Actions — a cloud runner has no network path to
+`localhost`. `scripts/daily_run.ps1` runs ingest + match and logs the full
+output with a timestamp to `logs/` (auto-pruned after 14 days).
+
+Set up once: Task Scheduler → Create Basic Task → Daily trigger → Action
+"Start a program" → `powershell.exe` with arguments
+`-ExecutionPolicy Bypass -File "path\to\scripts\daily_run.ps1"`.
+
 ## Engineering decisions — the real bug history
 
 Four real scoring bugs were found and fixed through the eval harness, not
@@ -139,10 +150,23 @@ scored and displayed as if they were full-time roles. Fixed with a
 title-based classifier, same pattern and same title-over-description
 reasoning as the seniority/domain classifiers above.
 
-**Lesson that generalizes across all five bugs:** short substrings and
-full description text are both unreliable signals in this domain — company
-boilerplate and incidental word matches pollute them in predictable ways.
-Titles and word-boundary-matched keywords are far more trustworthy.
+**6. Workday's pagination silently truncated to 40 jobs per company.**
+The `total` field in Workday's response API only reports the real count on
+the first page of results — every subsequent page reports `total=0` while
+still returning real, valid job postings. This looked identical to bot
+blocking at first (verified NOT to be that: tried a persistent session
+client and a polite delay between requests, neither changed the behavior —
+the pattern was too perfectly deterministic to be rate-limiting). Fixed by
+capturing `total` once from page 0 and reusing that value for pagination
+decisions, rather than re-trusting an unreliable field on every request.
+Result: 40 → 100 jobs per company (the configured cap), across all four
+tracked companies.
+
+**Lesson that generalizes across all six bugs:** short substrings, full
+description text, and even a well-documented API field can all be
+unreliable signals — company boilerplate, incidental word matches, and an
+API quirk all pollute data in predictable-once-you-look ways. Verify with
+real evidence before trusting any single signal at face value.
 
 ## Known limitations (honest, not fixed yet)
 
@@ -164,9 +188,30 @@ Titles and word-boundary-matched keywords are far more trustworthy.
 
 ## Roadmap (not built, deliberately deferred)
 
-- Resume-tailoring suggestions per job (Groq, reusing the same skill
-  extraction infrastructure)
 - Application tracking workspace (CareerVault-style entity model:
   opportunity → application → resume version → interview → outcome)
-- Scheduled daily runs (GitHub Actions, free tier)
-- Freelance/contract engagement-type handling done properly
+- Freelance/contract engagement-type handling done properly (currently
+  tagged correctly but not yet weighted differently in scoring)
+
+## Moving to a new machine
+
+Nothing here is tied to one specific PC — the database is fully
+regenerable from live APIs, so there's no real data migration, just a
+fresh setup. On the new machine:
+
+1. `git clone` this repo (everything except secrets and local state is
+   already here)
+2. Copy your `.env` file over manually (it's gitignored on purpose — never
+   committed, so it has to move separately, e.g. via USB or a private note
+   to yourself)
+3. Install Postgres, enable the `pgvector` extension, run `schema.sql`
+4. Install Ollama, `ollama pull nomic-embed-text`
+5. `pip install -r requirements.txt`
+6. `python -m app.ingest` — rebuilds the full job dataset from scratch
+   (~20-30 min, same as any normal run — you're not losing anything real,
+   since every job is a live listing anyway and old ones would be stale by
+   migration day regardless)
+7. `python -m app.resume_ingest` with your resume file dropped in `resumes/`
+8. Recreate the Task Scheduler entry (see "Scheduled daily runs" above)
+
+Total: roughly 30-45 minutes, mostly waiting on installs, not debugging.
