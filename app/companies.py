@@ -30,7 +30,7 @@ REMOTEOK_TAGS: list[str] = [
 # currently-active Ashby-hosted boards — Ramp especially skews toward
 # fintech/AI engineering roles.
 ASHBY_COMPANIES: list[str] = [
-    "ramp", "jerry", "alan"
+    "ramp", "alan"
 ]
 
 # Workday: format is (tenant, wd_server, site, display_name). Unlike the
