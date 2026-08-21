@@ -25,4 +25,6 @@ jobs:
           pip install pytest pydantic pydantic-settings
 
       - name: Run regression tests
+        env:
+          DATABASE_URL: postgresql+psycopg2://placeholder:placeholder@localhost/placeholder
         run: pytest tests/ -v

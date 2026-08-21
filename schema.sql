@@ -57,3 +57,25 @@ CREATE TABLE IF NOT EXISTS resumes (
 -- Safe to re-run: adds the column if you're upgrading an existing resumes
 -- table created before this field existed.
 ALTER TABLE resumes ADD COLUMN IF NOT EXISTS skills TEXT[];
+
+CREATE TABLE IF NOT EXISTS applications (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    job_id          UUID NOT NULL REFERENCES jobs(id),
+    resume_id       UUID REFERENCES resumes(id),
+
+    -- saved -> applied -> interviewing -> offer / rejected / withdrawn
+    status          TEXT NOT NULL DEFAULT 'saved',
+
+    applied_at      TIMESTAMPTZ,
+    notes           TEXT,
+    follow_up_date  DATE,
+
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+
+    -- one tracking record per job — re-running 'add' on the same job
+    -- updates it rather than creating duplicates
+    UNIQUE(job_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_applications_status ON applications (status);
