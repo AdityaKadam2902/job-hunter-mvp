@@ -1,10 +1,5 @@
 name: Tests
 
-# Runs the regression suite automatically on every push and pull request.
-# This is the actual point of having tests at all — a bug fix that isn't
-# checked automatically will eventually get silently reverted by a future
-# edit. This workflow is what makes that impossible instead of just unlikely.
-
 on:
   push:
   pull_request:
