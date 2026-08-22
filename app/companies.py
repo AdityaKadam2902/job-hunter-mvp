@@ -24,13 +24,20 @@ REMOTEOK_TAGS: list[str] = [
     "machine-learning",
     "python",
     "ai",
+    "genai",
+    "artificial-intelligence",
+    "generative-ai",
+    "llm",
+    "large-language-model",
+    "agentic-ai",
+    "rag",
 ]
 
 # Ashby: same public-API pattern as Greenhouse/Lever. Confirmed real,
 # currently-active Ashby-hosted boards — Ramp especially skews toward
 # fintech/AI engineering roles.
 ASHBY_COMPANIES: list[str] = [
-    "ramp", "alan"
+    "ramp", "alan", "snowflake", "cerebras", "rebar", "reflow", "zyphra", "spotdrift"
 ]
 
 # Workday: format is (tenant, wd_server, site, display_name). Unlike the

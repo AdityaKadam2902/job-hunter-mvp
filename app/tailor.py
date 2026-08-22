@@ -1,13 +1,9 @@
 """
 Run with: python -m app.tailor
 
-For your top N matched jobs (from the most recent app.match run), asks
-Groq to suggest 2-3 tailored resume bullets per job — pulled from what's
-ACTUALLY in your resume, reworded/reprioritized to speak to that specific
-job description, not generic advice invented from nothing.
-
-Reuses the same resume text and Groq infrastructure already built for
-skill extraction — this is deliberately a thin script, not a new pipeline.
+For your top N matched jobs, asks Groq to suggest 2-3 tailored resume
+bullets per job — pulled from what's ACTUALLY in your resume, reworded
+toward that specific job description, never invented.
 """
 
 import json
@@ -54,23 +50,20 @@ def get_active_resume_text(conn) -> str:
 
 
 def get_top_jobs(conn, resume_text: str, limit: int):
-    """Applies the SAME 5-factor rubric as match.py — similarity, keyword
-    overlap, seniority fit, domain fit, AI specificity — not just raw
-    embedding similarity. An earlier version of this function only ordered
-    by similarity, which meant tailoring effort could be spent on jobs that
-    weren't actually your real top matches (e.g. a senior-tagged role that
-    match.py's seniority penalty would rank much lower)."""
+    """Applies the full 5-factor rubric — same as match.py — and, unlike
+    the earlier version of this function, actually attaches EVERY
+    component score to the returned dict, not just the final combined
+    score. The API/dashboard needs the breakdown to show WHY a job ranked
+    where it did, not just the number."""
     resume_skills = extract_resume_skills(resume_text)
 
     with conn.cursor() as cur:
         cur.execute("SELECT embedding FROM resumes WHERE is_active = true ORDER BY uploaded_at DESC LIMIT 1")
         resume_embedding = cur.fetchone()[0]
 
-        # Same two-stage pattern as match.py: cheap similarity pull for a
-        # shortlist, THEN apply the full rubric only on that shortlist.
         cur.execute(
             """
-            SELECT id, company, title, description, url, seniority,
+            SELECT id, company, title, description, url, seniority, engagement_type,
                    1 - (embedding <=> %s) AS similarity
             FROM jobs
             WHERE embedding IS NOT NULL
@@ -90,7 +83,14 @@ def get_top_jobs(conn, resume_text: str, limit: int):
         dom_score = domain_fit_score(job["title"])
         ai_score = ai_specificity_score(job["title"], job["description"] or "")
         score = final_score(job["similarity"], kw_score, sen_score, dom_score, ai_score)
-        scored.append({**job, "final_score": score})
+        scored.append({
+            **job,
+            "final_score": score,
+            "keyword_score": kw_score,
+            "seniority_score": sen_score,
+            "domain_score": dom_score,
+            "ai_specificity": ai_score,
+        })
 
     scored.sort(key=lambda j: j["final_score"], reverse=True)
     return scored[:limit]

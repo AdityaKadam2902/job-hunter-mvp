@@ -38,3 +38,5 @@ eval/predictions_autolabel_backup.csv
 
 # Daily scheduled run logs
 logs/*
+
+node_modules/
