@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from app.db import get_raw_conn
-from app.tailor import get_active_resume_text, get_top_jobs
+from app.tailor import get_resume, get_top_jobs
 
 STATUSES = ["saved", "applied", "interviewing", "offer", "rejected", "withdrawn"]
 
@@ -23,6 +23,7 @@ app.add_middleware(
 
 class ApplicationCreate(BaseModel):
     job_id: str
+    resume_id: str | None = None
     status: str = "saved"
     notes: str | None = None
 
@@ -31,12 +32,30 @@ class ApplicationStatusUpdate(BaseModel):
     status: str
 
 
-@app.get("/api/jobs/top")
-def get_top_matches(limit: int = 20):
+@app.get("/api/resumes")
+def list_resumes():
+    """Powers the profile switcher — one entry per person/resume version
+    tracked in this instance (e.g. your AI/ML resume, a friend's Data
+    Analyst resume). The frontend lets you pick one; everything else
+    filters by it from there."""
     conn = get_raw_conn()
     try:
-        resume_text = get_active_resume_text(conn)
-        jobs = get_top_jobs(conn, resume_text, limit)
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id, version_label, uploaded_at FROM resumes ORDER BY uploaded_at DESC"
+            )
+            rows = cur.fetchall()
+    finally:
+        conn.close()
+    return [{"id": str(r[0]), "label": r[1], "uploaded_at": r[2].isoformat()} for r in rows]
+
+
+@app.get("/api/jobs/top")
+def get_top_matches(limit: int = 20, resume_id: str | None = None):
+    conn = get_raw_conn()
+    try:
+        resume = get_resume(conn, resume_id)
+        jobs = get_top_jobs(conn, resume, limit)
     finally:
         conn.close()
     return [
@@ -48,6 +67,7 @@ def get_top_matches(limit: int = 20):
             "seniority": j["seniority"],
             "engagement_type": j["engagement_type"],
             "score": round(j["final_score"], 2),
+            "matched_skills": j["matched_skills"],
             "breakdown": {
                 "similarity": round(j["similarity"], 2),
                 "keyword": round(j["keyword_score"], 2),
@@ -61,18 +81,24 @@ def get_top_matches(limit: int = 20):
 
 
 @app.get("/api/applications")
-def list_applications():
+def list_applications(resume_id: str | None = None):
+    """resume_id filters to only the applications tracked under that
+    person's resume — this is what makes 'go to her list vs mine' work,
+    reusing applications.resume_id which was already being recorded."""
     conn = get_raw_conn()
     try:
         with conn.cursor() as cur:
-            cur.execute(
-                """
+            query = """
                 SELECT a.id, a.status, j.company, j.title, a.applied_at, a.notes, j.url
                 FROM applications a
                 JOIN jobs j ON j.id = a.job_id
-                ORDER BY a.updated_at DESC
-                """
-            )
+            """
+            params = ()
+            if resume_id:
+                query += " WHERE a.resume_id = %s"
+                params = (resume_id,)
+            query += " ORDER BY a.updated_at DESC"
+            cur.execute(query, params)
             rows = cur.fetchall()
     finally:
         conn.close()
@@ -91,18 +117,16 @@ def add_application(payload: ApplicationCreate):
         raise HTTPException(400, f"Invalid status. Choose from: {STATUSES}")
     conn = get_raw_conn()
     try:
+        resume = get_resume(conn, payload.resume_id)
         with conn.cursor() as cur:
-            cur.execute("SELECT id FROM resumes WHERE is_active = true ORDER BY uploaded_at DESC LIMIT 1")
-            row = cur.fetchone()
-            resume_id = row[0] if row else None
             cur.execute(
                 """
                 INSERT INTO applications (job_id, resume_id, status, notes)
                 VALUES (%s, %s, %s, %s)
-                ON CONFLICT (job_id) DO UPDATE SET status = EXCLUDED.status, updated_at = now()
+                ON CONFLICT (job_id) DO UPDATE SET status = EXCLUDED.status, resume_id = EXCLUDED.resume_id, updated_at = now()
                 RETURNING id
                 """,
-                (payload.job_id, resume_id, payload.status, payload.notes),
+                (payload.job_id, resume["id"], payload.status, payload.notes),
             )
             app_id = cur.fetchone()[0]
         conn.commit()
