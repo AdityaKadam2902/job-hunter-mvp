@@ -1,11 +1,9 @@
 """
 Extracts skills from a resume using Groq's LLM API — catches skills
-mentioned anywhere in the document (project bullets, experience, summary),
-not just under a literal 'Skills' heading, and normalizes synonyms
-("Postgres" / "PostgreSQL" -> one term) the regex approach couldn't.
+mentioned anywhere in the document, not just under a literal 'Skills'
+heading, and normalizes synonyms the regex fallback can't.
 
-Runs once per resume at ingest time, not per match run — the result is
-cached in resumes.skills so normal matching never calls the API.
+Runs once per resume at ingest time, cached in resumes.skills.
 """
 
 import json
@@ -16,26 +14,21 @@ from app.config import settings
 from app.scoring import extract_resume_skills  # regex fallback
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = "openai/gpt-oss-120b"  # llama-3.3-70b-versatile was deprecated by Groq on 2026-06-17
 
 _SYSTEM_PROMPT = (
     "You extract technical skills from resumes. Read the entire resume, "
     "including project descriptions and experience bullets, not just a "
     "Skills section if one exists. Return ONLY a JSON array of lowercase "
     "skill strings — no explanation, no markdown code fences, no keys, "
-    "just the array. Normalize obvious synonyms to one form (e.g. "
-    "'PostgreSQL' and 'Postgres' both become 'postgresql'). Include "
+    "just the array. Normalize obvious synonyms to one form. Include "
     "languages, frameworks, libraries, databases, cloud/infra tools, and "
-    "named techniques (e.g. 'rag', 'hybrid search', 'fine-tuning'). Do not "
-    "include soft skills, job titles, or company names."
+    "named techniques. Do not include soft skills, job titles, section "
+    "headers, or company names."
 )
 
 
 def extract_skills_llm(resume_text: str) -> list[str]:
-    """Returns a normalized skill list, or falls back to regex extraction
-    if the Groq API key is missing or the call fails for any reason —
-    ingest should never hard-fail just because skill extraction had a
-    hiccup."""
     if not settings.groq_api_key:
         print("[skills] no GROQ_API_KEY set — falling back to regex extraction")
         return sorted(extract_resume_skills(resume_text))
@@ -57,8 +50,6 @@ def extract_skills_llm(resume_text: str) -> list[str]:
         resp.raise_for_status()
         content = resp.json()["choices"][0]["message"]["content"].strip()
 
-        # Model sometimes wraps output in ```json fences despite instructions —
-        # strip those before parsing rather than failing on them.
         if content.startswith("```"):
             content = content.strip("`")
             content = content.removeprefix("json").strip()

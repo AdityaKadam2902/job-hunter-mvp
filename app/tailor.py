@@ -18,11 +18,12 @@ from app.scoring import (
     extract_resume_skills,
     final_score,
     keyword_overlap_score,
+    matched_skills,
     seniority_fit_score,
 )
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = "openai/gpt-oss-120b"  # llama-3.3-70b-versatile was deprecated by Groq on 2026-06-17
 TOP_N_TO_TAILOR = 5
 
 _SYSTEM_PROMPT = (
@@ -49,18 +50,38 @@ def get_active_resume_text(conn) -> str:
     return row[0]
 
 
-def get_top_jobs(conn, resume_text: str, limit: int):
-    """Applies the full 5-factor rubric — same as match.py — and, unlike
-    the earlier version of this function, actually attaches EVERY
-    component score to the returned dict, not just the final combined
-    score. The API/dashboard needs the breakdown to show WHY a job ranked
-    where it did, not just the number."""
-    resume_skills = extract_resume_skills(resume_text)
+def get_resume(conn, resume_id: str | None = None) -> dict:
+    """Fetch a specific resume by id, or fall back to the most recently
+    uploaded active one if no id given (preserves old single-user
+    behavior for existing scripts). This is the actual fix that unblocks
+    multi-person use — before, get_top_jobs always silently re-queried
+    'the' active resume internally, making it impossible to match against
+    a SPECIFIC person's resume by choice."""
+    with conn.cursor() as cur:
+        if resume_id:
+            cur.execute(
+                "SELECT id, version_label, raw_text, embedding, skills FROM resumes WHERE id = %s",
+                (resume_id,),
+            )
+        else:
+            cur.execute(
+                "SELECT id, version_label, raw_text, embedding, skills FROM resumes "
+                "WHERE is_active = true ORDER BY uploaded_at DESC LIMIT 1"
+            )
+        row = cur.fetchone()
+    if row is None:
+        raise SystemExit(f"No resume found" + (f" with id {resume_id}" if resume_id else " — run app.resume_ingest first."))
+    return {"id": row[0], "version_label": row[1], "raw_text": row[2], "embedding": row[3], "skills": row[4]}
+
+
+def get_top_jobs(conn, resume: dict, limit: int):
+    """Applies the full 5-factor rubric against a SPECIFIC resume dict
+    (from get_resume above) — not an internally re-queried 'active' one.
+    Also attaches matched_skills per job now, for the frontend's 'why this
+    matches' explainability view."""
+    resume_skills = extract_resume_skills(resume["raw_text"])
 
     with conn.cursor() as cur:
-        cur.execute("SELECT embedding FROM resumes WHERE is_active = true ORDER BY uploaded_at DESC LIMIT 1")
-        resume_embedding = cur.fetchone()[0]
-
         cur.execute(
             """
             SELECT id, company, title, description, url, seniority, engagement_type,
@@ -70,7 +91,7 @@ def get_top_jobs(conn, resume_text: str, limit: int):
             ORDER BY embedding <=> %s
             LIMIT 100
             """,
-            (resume_embedding, resume_embedding),
+            (resume["embedding"], resume["embedding"]),
         )
         cols = [d[0] for d in cur.description]
         candidates = [dict(zip(cols, row)) for row in cur.fetchall()]
@@ -90,6 +111,7 @@ def get_top_jobs(conn, resume_text: str, limit: int):
             "seniority_score": sen_score,
             "domain_score": dom_score,
             "ai_specificity": ai_score,
+            "matched_skills": matched_skills(resume_skills, job_text),
         })
 
     scored.sort(key=lambda j: j["final_score"], reverse=True)
@@ -135,8 +157,9 @@ def main() -> None:
 
     conn = get_raw_conn()
     try:
-        resume_text = get_active_resume_text(conn)
-        jobs = get_top_jobs(conn, resume_text, TOP_N_TO_TAILOR)
+        resume = get_resume(conn)
+        resume_text = resume["raw_text"]
+        jobs = get_top_jobs(conn, resume, TOP_N_TO_TAILOR)
     finally:
         conn.close()
 
