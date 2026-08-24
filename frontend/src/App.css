@@ -45,6 +45,13 @@ code { font-family: var(--font-mono); background: var(--panel-raised); padding: 
   font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.1em;
   color: var(--text-muted); text-transform: uppercase; margin-bottom: 8px;
 }
+
+.profile-switcher { display: flex; flex-direction: column; gap: 4px; }
+.profile-btn {
+  text-align: left; background: var(--panel-raised); border: 1px solid var(--border); color: var(--text-muted);
+  font-family: var(--font-sans); font-size: 12px; padding: 8px 10px; border-radius: 6px; cursor: pointer;
+}
+.profile-btn.active { border-color: var(--signal); color: var(--signal); font-weight: 600; }
 .stat-row { display: flex; justify-content: space-between; font-size: 12px; padding: 4px 0; text-transform: capitalize; }
 .stat-value { font-family: var(--font-mono); color: var(--signal); }
 
@@ -62,10 +69,31 @@ code { font-family: var(--font-mono); background: var(--panel-raised); padding: 
 
 /* ---------- Job cards ---------- */
 .job-list { display: flex; flex-direction: column; gap: 10px; }
+.job-card-wrap { display: flex; flex-direction: column; }
 .job-card {
   display: flex; align-items: center; gap: 18px;
   background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
   padding: 14px 18px;
+}
+
+.why-btn {
+  background: none; border: 1px solid var(--border); color: var(--text-muted);
+  padding: 6px 12px; border-radius: 6px; cursor: pointer; font-size: 11px; flex-shrink: 0;
+}
+.why-btn:hover { border-color: var(--signal); color: var(--signal); }
+
+.why-panel {
+  background: var(--void); border: 1px solid var(--border); border-top: none;
+  border-radius: 0 0 10px 10px; padding: 14px 18px; margin-top: -2px; display: flex; flex-direction: column; gap: 10px;
+}
+.why-row { display: flex; flex-direction: column; gap: 6px; }
+.why-label { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.why-text { font-size: 12px; color: var(--text); font-family: var(--font-mono); }
+.why-empty { font-size: 12px; color: var(--text-muted); font-style: italic; }
+.skill-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  background: var(--panel-raised); border: 1px solid var(--signal-dim); color: var(--signal);
+  font-family: var(--font-mono); font-size: 11px; padding: 3px 9px; border-radius: 12px;
 }
 
 .signal-bars { display: flex; align-items: flex-end; gap: 3px; height: 34px; flex-shrink: 0; }

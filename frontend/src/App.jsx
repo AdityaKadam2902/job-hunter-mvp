@@ -1,20 +1,31 @@
 import { useEffect, useMemo, useState } from "react";
-import { fetchTopJobs, fetchApplications, addApplication, updateApplicationStatus } from "./api";
+import { fetchResumes, fetchTopJobs, fetchApplications, addApplication, updateApplicationStatus } from "./api";
 import SignalBars from "./SignalBars";
 
 const STATUSES = ["saved", "applied", "interviewing", "offer", "rejected", "withdrawn"];
 
 export default function App() {
   const [tab, setTab] = useState("matches");
+  const [resumes, setResumes] = useState([]);
+  const [activeResumeId, setActiveResumeId] = useState(null);
   const [jobs, setJobs] = useState([]);
   const [applications, setApplications] = useState([]);
+  const [expandedJobId, setExpandedJobId] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  async function loadAll() {
+  async function loadResumes() {
+    const list = await fetchResumes();
+    setResumes(list);
+    if (list.length > 0 && !activeResumeId) setActiveResumeId(list[0].id);
+    return list;
+  }
+
+  async function loadForProfile(resumeId) {
+    if (!resumeId) return;
     setLoading(true);
     try {
-      const [j, a] = await Promise.all([fetchTopJobs(20), fetchApplications()]);
+      const [j, a] = await Promise.all([fetchTopJobs(resumeId, 20), fetchApplications(resumeId)]);
       setJobs(j);
       setApplications(a);
     } catch (e) {
@@ -25,17 +36,21 @@ export default function App() {
   }
 
   useEffect(() => {
-    loadAll();
+    loadResumes();
   }, []);
 
+  useEffect(() => {
+    if (activeResumeId) loadForProfile(activeResumeId);
+  }, [activeResumeId]);
+
   async function handleTrack(jobId) {
-    await addApplication(jobId, "saved");
-    await loadAll();
+    await addApplication(jobId, activeResumeId, "saved");
+    await loadForProfile(activeResumeId);
   }
 
   async function handleStatusChange(applicationId, newStatus) {
     await updateApplicationStatus(applicationId, newStatus);
-    await loadAll();
+    await loadForProfile(activeResumeId);
   }
 
   const trackedUrls = useMemo(() => new Set(applications.map((a) => a.url)), [applications]);
@@ -55,6 +70,19 @@ export default function App() {
             <div className="brand-name">JOB HUNTER</div>
             <div className="brand-sub">signal console</div>
           </div>
+        </div>
+
+        <div className="profile-switcher">
+          <div className="stats-heading">Profile</div>
+          {resumes.map((r) => (
+            <button
+              key={r.id}
+              className={`profile-btn ${r.id === activeResumeId ? "active" : ""}`}
+              onClick={() => setActiveResumeId(r.id)}
+            >
+              {r.label}
+            </button>
+          ))}
         </div>
 
         <nav className="nav">
@@ -106,21 +134,51 @@ export default function App() {
             ) : (
               <div className="job-list">
                 {jobs.map((job) => (
-                  <div className="job-card" key={job.id}>
-                    <SignalBars breakdown={job.breakdown} />
-                    <div className="job-score">{job.score.toFixed(2)}</div>
-                    <div className="job-info">
-                      <strong>{job.title}</strong>
-                      <span>{job.company} · {job.seniority} · {job.engagement_type}</span>
-                      <a href={job.url} target="_blank" rel="noreferrer">View posting ↗</a>
+                  <div className="job-card-wrap" key={job.id}>
+                    <div className="job-card">
+                      <SignalBars breakdown={job.breakdown} />
+                      <div className="job-score">{job.score.toFixed(2)}</div>
+                      <div className="job-info">
+                        <strong>{job.title}</strong>
+                        <span>{job.company} · {job.seniority} · {job.engagement_type}</span>
+                        <a href={job.url} target="_blank" rel="noreferrer">View posting ↗</a>
+                      </div>
+                      <button
+                        className="why-btn"
+                        onClick={() => setExpandedJobId(expandedJobId === job.id ? null : job.id)}
+                      >
+                        {expandedJobId === job.id ? "Hide" : "Why?"}
+                      </button>
+                      <button
+                        className="track-btn"
+                        disabled={trackedUrls.has(job.url)}
+                        onClick={() => handleTrack(job.id)}
+                      >
+                        {trackedUrls.has(job.url) ? "Tracked" : "Track"}
+                      </button>
                     </div>
-                    <button
-                      className="track-btn"
-                      disabled={trackedUrls.has(job.url)}
-                      onClick={() => handleTrack(job.id)}
-                    >
-                      {trackedUrls.has(job.url) ? "Tracked" : "Track"}
-                    </button>
+                    {expandedJobId === job.id && (
+                      <div className="why-panel">
+                        <div className="why-row">
+                          <span className="why-label">Matched skills</span>
+                          {job.matched_skills.length > 0 ? (
+                            <div className="skill-chips">
+                              {job.matched_skills.map((s) => <span className="chip" key={s}>{s}</span>)}
+                            </div>
+                          ) : (
+                            <span className="why-empty">No direct skill keyword matches — ranked on semantic similarity alone.</span>
+                          )}
+                        </div>
+                        <div className="why-row">
+                          <span className="why-label">Score breakdown</span>
+                          <span className="why-text">
+                            Similarity {job.breakdown.similarity} · Skills {job.breakdown.keyword} ·
+                            {" "}Level fit {job.breakdown.seniority} · Domain fit {job.breakdown.domain} ·
+                            {" "}AI-role fit {job.breakdown.ai_fit}
+                          </span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
