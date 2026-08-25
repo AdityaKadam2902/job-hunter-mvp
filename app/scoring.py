@@ -1,6 +1,6 @@
 import re
 
-from app.role_config import GENERIC_ADJACENT_TITLE_MARKERS, ROLE_SPECIFIC_MARKERS
+from app.role_config import GENERIC_ADJACENT_TITLE_MARKERS, ROLE_SPECIFIC_MARKERS, SUB_ROLE_TAGS
 
 FALLBACK_SKILL_VOCAB = ["python", "sql", "javascript", "docker", "git", "aws", "rest api", "machine learning", "llm", "rag"]
 
@@ -96,6 +96,17 @@ def role_specificity_score(title: str, description: str) -> float:
 # tests) calls this by its original name. New code can use either name;
 # both point at the same function.
 ai_specificity_score = role_specificity_score
+
+
+def get_sub_role_tags(title: str) -> list[str]:
+    """Fine-grained badges (GenAI, Agentic AI, RAG, etc — see
+    app/role_config.py) for a job title. TITLE ONLY, deliberately — same
+    reasoning as role_specificity_score: description text is polluted by
+    company boilerplate at AI-native companies regardless of the actual
+    role. A job can match multiple tags, or none (absence isn't an error,
+    just means no specific sub-category matched)."""
+    title_lower = f" {title.lower()} "
+    return [tag for tag, markers in SUB_ROLE_TAGS.items() if any(m in title_lower for m in markers)]
 
 
 def final_score(similarity: float, keyword_score: float, seniority_score: float,

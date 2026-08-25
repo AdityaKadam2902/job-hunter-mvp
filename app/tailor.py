@@ -17,6 +17,7 @@ from app.scoring import (
     domain_fit_score,
     extract_resume_skills,
     final_score,
+    get_sub_role_tags,
     keyword_overlap_score,
     matched_skills,
     seniority_fit_score,
@@ -112,6 +113,7 @@ def get_top_jobs(conn, resume: dict, limit: int):
             "domain_score": dom_score,
             "ai_specificity": ai_score,
             "matched_skills": matched_skills(resume_skills, job_text),
+            "sub_role_tags": get_sub_role_tags(job["title"]),
         })
 
     scored.sort(key=lambda j: j["final_score"], reverse=True)

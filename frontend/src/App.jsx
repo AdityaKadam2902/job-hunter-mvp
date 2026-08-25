@@ -139,7 +139,12 @@ export default function App() {
                       <SignalBars breakdown={job.breakdown} />
                       <div className="job-score">{job.score.toFixed(2)}</div>
                       <div className="job-info">
-                        <strong>{job.title}</strong>
+                        <div className="job-title-row">
+                          <strong>{job.title}</strong>
+                          {job.sub_role_tags?.map((tag) => (
+                            <span className="role-badge" key={tag}>{tag}</span>
+                          ))}
+                        </div>
                         <span>{job.company} · {job.seniority} · {job.engagement_type}</span>
                         <a href={job.url} target="_blank" rel="noreferrer">View posting ↗</a>
                       </div>

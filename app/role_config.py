@@ -35,3 +35,30 @@ GENERIC_ADJACENT_TITLE_MARKERS = [
     "systems engineer", "platform engineer", "integration engineer",
     "qa engineer", "security engineer", "infrastructure",
 ]
+
+# Fine-grained badges shown per job in the dashboard — e.g. distinguishing
+# "GenAI" from "Agentic AI" from "RAG" within your broader AI/ML target.
+# Checked against the TITLE ONLY (not description) — the same lesson from
+# fixing ai_specificity_score: company boilerplate at AI-native companies
+# mentions AI/GenAI/etc regardless of the actual role, so description text
+# is an unreliable signal here. A job can match multiple tags, or none.
+SUB_ROLE_TAGS = {
+    "GenAI": ["generative ai", "genai", "llm", "large language model"],
+    "Agentic AI": ["agentic", "multi-agent", "ai agent", "agent"],
+    "RAG": ["rag", "retrieval augmented", "retrieval-augmented"],
+    "MLOps": ["mlops", "ml infrastructure", "model deployment", "ml platform"],
+    "Computer Vision": ["computer vision", "cv engineer"],
+    "NLP": ["nlp", "natural language processing"],
+    "Research": ["research scientist", "applied scientist"],
+    "AI/ML Engineer": ["machine learning engineer", "ml engineer", "ai engineer", "applied ai"],
+}
+
+# Example alternate SUB_ROLE_TAGS for a Data Analyst / BI / Data Engineer
+# target (e.g. Sakshi's profile) — swap in on that person's clone instead:
+#
+# SUB_ROLE_TAGS = {
+#     "Data Analyst": ["data analyst", "business intelligence", "bi analyst"],
+#     "Data Engineer": ["data engineer", "etl", "data pipeline"],
+#     "Data Scientist": ["data scientist"],
+#     "BI / Reporting": ["power bi", "tableau", "dax", "reporting analyst"],
+# }
