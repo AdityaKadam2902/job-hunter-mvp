@@ -12,6 +12,7 @@ import httpx
 
 from app.config import settings
 from app.db import get_raw_conn
+from app.role_config import get_role_profile
 from app.scoring import (
     ai_specificity_score,
     domain_fit_score,
@@ -78,9 +79,12 @@ def get_resume(conn, resume_id: str | None = None) -> dict:
 def get_top_jobs(conn, resume: dict, limit: int):
     """Applies the full 5-factor rubric against a SPECIFIC resume dict
     (from get_resume above) — not an internally re-queried 'active' one.
-    Also attaches matched_skills per job now, for the frontend's 'why this
-    matches' explainability view."""
+    Also attaches matched_skills and sub_role_tags for the frontend's
+    'why this matches' explainability view."""
     resume_skills = extract_resume_skills(resume["raw_text"])
+    # Auto-selects the right marker set (AI/ML vs Data Analyst/etc) based
+    # on WHOSE resume this is — no more manually editing role_config.py.
+    profile = get_role_profile(resume.get("version_label"))
 
     with conn.cursor() as cur:
         cur.execute(
@@ -103,7 +107,10 @@ def get_top_jobs(conn, resume: dict, limit: int):
         kw_score = keyword_overlap_score(resume_skills, job_text)
         sen_score = seniority_fit_score(job["seniority"])
         dom_score = domain_fit_score(job["title"])
-        ai_score = ai_specificity_score(job["title"], job["description"] or "")
+        ai_score = ai_specificity_score(
+            job["title"], job["description"] or "",
+            profile["role_specific_markers"], profile["generic_adjacent_markers"],
+        )
         score = final_score(job["similarity"], kw_score, sen_score, dom_score, ai_score)
         scored.append({
             **job,
@@ -113,7 +120,7 @@ def get_top_jobs(conn, resume: dict, limit: int):
             "domain_score": dom_score,
             "ai_specificity": ai_score,
             "matched_skills": matched_skills(resume_skills, job_text),
-            "sub_role_tags": get_sub_role_tags(job["title"]),
+            "sub_role_tags": get_sub_role_tags(job["title"], profile["sub_role_tags"]),
         })
 
     scored.sort(key=lambda j: j["final_score"], reverse=True)

@@ -1,6 +1,8 @@
 import re
 
-from app.role_config import GENERIC_ADJACENT_TITLE_MARKERS, ROLE_SPECIFIC_MARKERS, SUB_ROLE_TAGS
+from app.role_config import get_role_profile
+
+_DEFAULT_PROFILE = get_role_profile(None)
 
 FALLBACK_SKILL_VOCAB = ["python", "sql", "javascript", "docker", "git", "aws", "rest api", "machine learning", "llm", "rag"]
 
@@ -79,15 +81,23 @@ def domain_fit_score(title: str) -> float:
     return 1.0
 
 
-def role_specificity_score(title: str, description: str) -> float:
-    """1.0 for a role matching your target field (see app/role_config.py),
-    0.5 for adjacent-but-different engineering work, 0.75 for ambiguous.
-    TITLE ONLY — description text is unreliable, since company boilerplate
-    mentions buzzwords regardless of the actual role."""
+def role_specificity_score(title: str, description: str, role_specific_markers: list | None = None,
+                            generic_adjacent_markers: list | None = None) -> float:
+    """1.0 for a role matching the target field, 0.5 for adjacent-but-
+    different engineering work, 0.75 for ambiguous. TITLE ONLY —
+    description text is unreliable, since company boilerplate mentions
+    buzzwords regardless of the actual role.
+
+    Marker lists default to the AI/ML profile (backward-compatible with
+    every existing caller/test) — pass explicit lists from a specific
+    role profile (see app/role_config.py) to target a different field."""
+    role_specific_markers = role_specific_markers or _DEFAULT_PROFILE["role_specific_markers"]
+    generic_adjacent_markers = generic_adjacent_markers or _DEFAULT_PROFILE["generic_adjacent_markers"]
+
     title_lower = f" {title.lower()} "
-    if any(marker in title_lower for marker in ROLE_SPECIFIC_MARKERS):
+    if any(marker in title_lower for marker in role_specific_markers):
         return 1.0
-    if any(marker in title_lower for marker in GENERIC_ADJACENT_TITLE_MARKERS):
+    if any(marker in title_lower for marker in generic_adjacent_markers):
         return 0.5
     return 0.75
 
@@ -98,15 +108,14 @@ def role_specificity_score(title: str, description: str) -> float:
 ai_specificity_score = role_specificity_score
 
 
-def get_sub_role_tags(title: str) -> list[str]:
-    """Fine-grained badges (GenAI, Agentic AI, RAG, etc — see
-    app/role_config.py) for a job title. TITLE ONLY, deliberately — same
-    reasoning as role_specificity_score: description text is polluted by
-    company boilerplate at AI-native companies regardless of the actual
-    role. A job can match multiple tags, or none (absence isn't an error,
-    just means no specific sub-category matched)."""
+def get_sub_role_tags(title: str, sub_role_tags: dict | None = None) -> list[str]:
+    """Fine-grained badges for a job title. TITLE ONLY, same reasoning as
+    role_specificity_score. Defaults to the AI/ML profile's tags —
+    pass a specific profile's dict (see app/role_config.py) to target a
+    different field. A job can match multiple tags, or none."""
+    sub_role_tags = sub_role_tags or _DEFAULT_PROFILE["sub_role_tags"]
     title_lower = f" {title.lower()} "
-    return [tag for tag, markers in SUB_ROLE_TAGS.items() if any(m in title_lower for m in markers)]
+    return [tag for tag, markers in sub_role_tags.items() if any(m in title_lower for m in markers)]
 
 
 def final_score(similarity: float, keyword_score: float, seniority_score: float,
