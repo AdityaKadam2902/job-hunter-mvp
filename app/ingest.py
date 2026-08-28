@@ -13,6 +13,16 @@ from app.connectors import ashby, greenhouse, lever, remoteok, workday
 from app.db import get_raw_conn
 from app.embeddings import embed_text
 from app.normalize import JobRecord, utcnow
+import json
+from pathlib import Path
+
+def _load_discovered_companies():
+    path = Path("app") / "discovered_companies.json"
+    if path.exists():
+        return json.loads(path.read_text())
+    return {"greenhouse": [], "lever": []}
+
+_discovered = _load_discovered_companies()
 
 
 def fetch_all() -> list[JobRecord]:

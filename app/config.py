@@ -8,7 +8,9 @@ class Settings(BaseSettings):
     ollama_url: str = "http://localhost:11434"
     ollama_embed_model: str = "nomic-embed-text"
     embedding_dim: int = 768
-    groq_api_key: str = ""  # unused until the scoring step
+    groq_api_key: str = ""
+    adzuna_app_id: str = ""
+    adzuna_app_key: str = ""
 
 
 settings = Settings()
