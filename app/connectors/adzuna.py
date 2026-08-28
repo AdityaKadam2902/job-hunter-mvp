@@ -5,6 +5,31 @@ from app.config import settings
 BASE_URL = "https://api.adzuna.com/v1/api/jobs/{country}/search/{page}"
 
 
+def fetch_jobs_for_role(query: str, max_days_old: int = 3, results_per_page: int = 20) -> list:
+    """Fetches actual JOB LISTINGS matching a role query directly — unlike
+    company-wide Greenhouse/Lever pulls, this is inherently relevance-
+    targeted from the start, not filtered after the fact. Returns
+    normalized JobRecord objects ready for the jobs table."""
+    from app.normalize import JobRecord  # local import avoids a circular import at module load
+
+    results = search(query, max_days_old=max_days_old, results_per_page=results_per_page)
+    jobs = []
+    for r in results:
+        company = r.get("company", {}).get("display_name", "Unknown")
+        record = JobRecord(
+            source="adzuna",
+            company=company,
+            company_slug=company.lower().replace(" ", "-"),
+            external_id=str(r.get("id", "")),
+            title=r.get("title", "").strip(),
+            location=(r.get("location") or {}).get("display_name"),
+            description=r.get("description", ""),
+            url=r.get("redirect_url"),
+        ).finalize()
+        jobs.append(record)
+    return jobs
+
+
 def search(query: str, country: str = "us", max_days_old: int = 3, results_per_page: int = 20) -> list[dict]:
     """Raw Adzuna search results — used for company DISCOVERY, not as a
     direct job source in the main jobs table. max_days_old=3 by default:

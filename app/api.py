@@ -69,6 +69,7 @@ def get_top_matches(limit: int = 20, resume_id: str | None = None):
             "score": round(j["final_score"], 2),
             "matched_skills": j["matched_skills"],
             "sub_role_tags": j["sub_role_tags"],
+            "already_applied_company": j["already_applied_company"],
             "breakdown": {
                 "similarity": round(j["similarity"], 2),
                 "keyword": round(j["keyword_score"], 2),
