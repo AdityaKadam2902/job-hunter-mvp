@@ -15,6 +15,9 @@ from app.embeddings import embed_text
 from app.normalize import JobRecord, utcnow
 import json
 from pathlib import Path
+from app.connectors import adzuna
+from app.relevance_filter import build_shared_relevance_markers, is_relevant_title
+from app.role_config import get_role_profile
 
 def _load_discovered_companies():
     path = Path("app") / "discovered_companies.json"
@@ -26,32 +29,56 @@ _discovered = _load_discovered_companies()
 
 
 def fetch_all() -> list[JobRecord]:
-    records: list[JobRecord] = []
+    records = []
+    relevance_markers = build_shared_relevance_markers()
 
+    # --- Greenhouse ---
     for slug in GREENHOUSE_COMPANIES:
-        jobs = greenhouse.fetch_jobs(slug)
-        print(f"[greenhouse] {slug}: {len(jobs)} jobs")
-        records.extend(jobs)
+        raw_jobs = greenhouse.fetch_jobs(slug)
+        filtered = [j for j in raw_jobs if is_relevant_title(j.title, relevance_markers)]
+        print(f"[greenhouse] {slug}: {len(raw_jobs)} jobs, {len(filtered)} kept")
+        records.extend(filtered)
 
+    # --- Lever ---
     for slug in LEVER_COMPANIES:
-        jobs = lever.fetch_jobs(slug)
-        print(f"[lever] {slug}: {len(jobs)} jobs")
-        records.extend(jobs)
+        raw_jobs = lever.fetch_jobs(slug)
+        filtered = [j for j in raw_jobs if is_relevant_title(j.title, relevance_markers)]
+        print(f"[lever] {slug}: {len(raw_jobs)} jobs, {len(filtered)} kept")
+        records.extend(filtered)
 
+    # --- Ashby ---
+    for slug in ASHBY_COMPANIES:
+        raw_jobs = ashby.fetch_jobs(slug)
+        filtered = [j for j in raw_jobs if is_relevant_title(j.title, relevance_markers)]
+        print(f"[ashby] {slug}: {len(raw_jobs)} jobs, {len(filtered)} kept")
+        records.extend(filtered)
+
+    # --- Workday ---
+    for tenant, wd_server, site, display_name in WORKDAY_COMPANIES:
+        raw_jobs = workday.fetch_jobs(tenant, wd_server, site, display_name)
+        filtered = [j for j in raw_jobs if is_relevant_title(j.title, relevance_markers)]
+        print(f"[workday] {display_name}: {len(raw_jobs)} jobs, {len(filtered)} kept")
+        records.extend(filtered)
+
+    # --- RemoteOK: NOT filtered, already searched by tag ---
     for tag in REMOTEOK_TAGS:
         jobs = remoteok.fetch_jobs(tag)
         print(f"[remoteok] tag '{tag}': {len(jobs)} jobs")
         records.extend(jobs)
 
-    for slug in ASHBY_COMPANIES:
-        jobs = ashby.fetch_jobs(slug)
-        print(f"[ashby] {slug}: {len(jobs)} jobs")
-        records.extend(jobs)
-
-    for tenant, wd_server, site, display_name in WORKDAY_COMPANIES:
-        jobs = workday.fetch_jobs(tenant, wd_server, site, display_name)
-        print(f"[workday] {display_name}: {len(jobs)} jobs")
-        records.extend(jobs)
+    # --- Adzuna: NOT filtered, already searched by role query ---
+        # --- Adzuna: NOW filtered too — evidence from a real run showed
+    # Adzuna's search is broad full-text matching, not title-precise, so
+    # results included noise like "Janitor Engineer" and "Graphic Designer"
+    # even from an "ai"-targeted query. The earlier assumption that Adzuna
+    # results were already precise enough to skip filtering was wrong.
+    for version_label in {"default"}:
+        profile = get_role_profile(version_label if version_label != "default" else None)
+        for query in profile["role_specific_markers"][:3]:
+            raw_jobs = adzuna.fetch_jobs_for_role(query, max_days_old=3)
+            filtered = [j for j in raw_jobs if is_relevant_title(j.title, relevance_markers)]
+            print(f"[adzuna] '{query}': {len(raw_jobs)} jobs, {len(filtered)} kept")
+            records.extend(filtered)
 
     return records
 
