@@ -8,31 +8,31 @@ Deliberately re-runnable: run this daily and it'll only do embedding work
 (the expensive-ish step) on genuinely new postings.
 """
 
-from app.companies import ASHBY_COMPANIES, GREENHOUSE_COMPANIES, LEVER_COMPANIES, REMOTEOK_TAGS, WORKDAY_COMPANIES
-from app.connectors import ashby, greenhouse, lever, remoteok, workday
+import json
+from pathlib import Path
+
+from app.companies import (
+    ASHBY_COMPANIES,
+    GREENHOUSE_COMPANIES,
+    LEVER_COMPANIES,
+    REMOTEOK_TAGS,
+    SMARTRECRUITERS_COMPANIES,
+    WORKDAY_COMPANIES,
+)
+from app.connectors import adzuna, ashby, greenhouse, lever, remoteok, smartrecruiters, workday
 from app.db import get_raw_conn
 from app.embeddings import embed_text
 from app.normalize import JobRecord, utcnow
-import json
-from pathlib import Path
-from app.connectors import adzuna
 from app.relevance_filter import build_shared_relevance_markers, is_relevant_title
 from app.role_config import get_role_profile
-from app.connectors import smartrecruiters
-from app.companies import SMARTRECRUITERS_COMPANIES
 
-# --- SmartRecruiters ---
-for company_id in SMARTRECRUITERS_COMPANIES:
-    raw_jobs = smartrecruiters.fetch_jobs(company_id)
-    filtered = [j for j in raw_jobs if is_relevant_title(j.title, relevance_markers)]
-    print(f"[smartrecruiters] {company_id}: {len(raw_jobs)} jobs, {len(filtered)} kept")
-    records.extend(filtered)
 
 def _load_discovered_companies():
     path = Path("app") / "discovered_companies.json"
     if path.exists():
         return json.loads(path.read_text())
     return {"greenhouse": [], "lever": []}
+
 
 _discovered = _load_discovered_companies()
 
@@ -69,21 +69,26 @@ def fetch_all() -> list[JobRecord]:
         print(f"[workday] {display_name}: {len(raw_jobs)} jobs, {len(filtered)} kept")
         records.extend(filtered)
 
+    # --- SmartRecruiters ---
+    for company_id in SMARTRECRUITERS_COMPANIES:
+        raw_jobs = smartrecruiters.fetch_jobs(company_id)
+        filtered = [j for j in raw_jobs if is_relevant_title(j.title, relevance_markers)]
+        print(f"[smartrecruiters] {company_id}: {len(raw_jobs)} jobs, {len(filtered)} kept")
+        records.extend(filtered)
+
     # --- RemoteOK: NOT filtered, already searched by tag ---
     for tag in REMOTEOK_TAGS:
         jobs = remoteok.fetch_jobs(tag)
         print(f"[remoteok] tag '{tag}': {len(jobs)} jobs")
         records.extend(jobs)
 
-    # --- Adzuna: NOT filtered, already searched by role query ---
-        # --- Adzuna: NOW filtered too — evidence from a real run showed
-    # Adzuna's search is broad full-text matching, not title-precise, so
-    # results included noise like "Janitor Engineer" and "Graphic Designer"
-    # even from an "ai"-targeted query. The earlier assumption that Adzuna
-    # results were already precise enough to skip filtering was wrong.
+    # --- Adzuna: filtered — evidence from a real run showed Adzuna's
+    # search is broad full-text matching, not title-precise, so results
+    # included noise ("Janitor Engineer", "Graphic Designer") even from an
+    # "ai"-targeted query. Widened to 7 queries for broader fresh coverage.
     for version_label in {"default"}:
         profile = get_role_profile(version_label if version_label != "default" else None)
-        for query in profile["role_specific_markers"][:3]:
+        for query in profile["role_specific_markers"][:7]:
             raw_jobs = adzuna.fetch_jobs_for_role(query, max_days_old=3)
             filtered = [j for j in raw_jobs if is_relevant_title(j.title, relevance_markers)]
             print(f"[adzuna] '{query}': {len(raw_jobs)} jobs, {len(filtered)} kept")
