@@ -138,7 +138,7 @@ def get_top_jobs(conn, resume: dict, limit: int):
         # won't dominate the top of the list the way a repeat listing was.
         is_new_company = job["company"].lower() not in applied_companies
         if not is_new_company:
-            score *= 0.7
+            score *= 0.4  # strengthened from 0.7 — evidence showed 0.7 wasn't enough to push repeat companies below genuinely new matches
 
         scored.append({
             **job,

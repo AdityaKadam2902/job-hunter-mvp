@@ -51,3 +51,7 @@ WORKDAY_COMPANIES: list[tuple[str, str, str, str]] = [
     ("adobe", "wd5", "external_experienced", "Adobe"),
     ("hp", "wd5", "ExternalCareerSite", "HP"),
 ]
+
+SMARTRECRUITERS_COMPANIES: list[str] = [
+    # add real company identifiers — find via jobs.smartrecruiters.com/{company}
+]

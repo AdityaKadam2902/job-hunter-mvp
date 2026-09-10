@@ -18,6 +18,15 @@ from pathlib import Path
 from app.connectors import adzuna
 from app.relevance_filter import build_shared_relevance_markers, is_relevant_title
 from app.role_config import get_role_profile
+from app.connectors import smartrecruiters
+from app.companies import SMARTRECRUITERS_COMPANIES
+
+# --- SmartRecruiters ---
+for company_id in SMARTRECRUITERS_COMPANIES:
+    raw_jobs = smartrecruiters.fetch_jobs(company_id)
+    filtered = [j for j in raw_jobs if is_relevant_title(j.title, relevance_markers)]
+    print(f"[smartrecruiters] {company_id}: {len(raw_jobs)} jobs, {len(filtered)} kept")
+    records.extend(filtered)
 
 def _load_discovered_companies():
     path = Path("app") / "discovered_companies.json"
