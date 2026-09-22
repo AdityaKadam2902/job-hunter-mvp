@@ -1,108 +1,63 @@
 """
-Run with: python -m app.match
+Run with: python -m app.match [--resume Sakshi_Resume]
 
-Pulls your active resume, compares its embedding against every stored job
-via pgvector cosine similarity, layers on the deterministic keyword +
-seniority rubric from scoring.py, and prints a ranked, explainable list.
-Also writes the full scored candidate list to eval/predictions.csv so it
-can be labeled for the eval harness (see app/eval.py).
+Pulls a resume (yours by default, or --resume <version_label> for a
+specific person), ranks stored jobs against it, and prints a ranked,
+explainable list. Also writes the full scored candidate list to
+eval/predictions.csv for the eval harness.
+
+IMPORTANT: this now calls app.tailor's get_resume() / get_top_jobs()
+instead of reimplementing scoring locally. It used to have its own
+parallel copy of the scoring loop, which meant every fix made to
+tailor.py (the already-applied-company demotion, per-person role
+profiles, sub-role tags) silently never applied here. Sharing one
+implementation is the actual fix — not just adding --resume support.
 """
 
+import argparse
 import csv
 from pathlib import Path
 
 from app.db import get_raw_conn
-from app.scoring import (
-    ai_specificity_score,
-    domain_fit_score,
-    extract_resume_skills,
-    final_score,
-    keyword_overlap_score,
-    matched_skills,
-    seniority_fit_score,
-)
+from app.tailor import get_resume, get_top_jobs
 
 TOP_N = 20
 EVAL_DIR = Path("eval")
 
 
-def get_active_resume(conn):
+def get_resume_id_by_label(conn, label: str) -> str:
     with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT id, version_label, raw_text, embedding, skills
-            FROM resumes
-            WHERE is_active = true
-            ORDER BY uploaded_at DESC
-            LIMIT 1
-            """
-        )
+        cur.execute("SELECT id FROM resumes WHERE version_label = %s", (label,))
         row = cur.fetchone()
     if row is None:
-        raise SystemExit(
-            "No active resume found. Run 'python -m app.resume_ingest' first "
-            "with a resume file in resumes/."
-        )
-    return {"id": row[0], "version_label": row[1], "raw_text": row[2], "embedding": row[3], "skills": row[4]}
-
-
-def get_top_jobs_by_similarity(conn, resume_embedding, limit: int):
-    """pgvector's <=> operator is cosine distance (0 = identical, 2 = opposite).
-    We convert to similarity (1 - distance) so higher = better, matching the
-    rest of the scoring scale."""
-    with conn.cursor() as cur:
-        cur.execute(
-            """
-            SELECT id, source, company, title, url, seniority, description,
-                   1 - (embedding <=> %s) AS similarity
-            FROM jobs
-            WHERE embedding IS NOT NULL
-            ORDER BY embedding <=> %s
-            LIMIT %s
-            """,
-            (resume_embedding, resume_embedding, limit),
-        )
-        cols = [desc[0] for desc in cur.description]
-        return [dict(zip(cols, row)) for row in cur.fetchall()]
+        raise SystemExit(f"No resume found with version_label '{label}'.")
+    return row[0]
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Rank jobs against a resume.")
+    parser.add_argument("--resume", default=None, help="version_label to match against (defaults to most recently uploaded)")
+    args = parser.parse_args()
+
     conn = get_raw_conn()
     try:
-        resume = get_active_resume(conn)
+        resume_id = get_resume_id_by_label(conn, args.resume) if args.resume else None
+        resume = get_resume(conn, resume_id)
         print(f"Matching against resume version: '{resume['version_label']}'")
 
-        if resume["skills"]:
-            resume_skills = set(resume["skills"])
-            print(f"Using {len(resume_skills)} LLM-extracted skills (cached at ingest time): "
-                  f"{', '.join(sorted(resume_skills))}\n")
+        if resume.get("skills"):
+            print(f"Using {len(resume['skills'])} LLM-extracted skills (cached at ingest time): "
+                  f"{', '.join(sorted(resume['skills']))}\n")
         else:
-            # Resume was ingested before LLM extraction existed — fall back
-            # rather than fail. Re-run resume_ingest.py to get the better version.
-            resume_skills = extract_resume_skills(resume["raw_text"])
-            print("No cached LLM skills found for this resume (ingested with an older "
-                  "version of the script) — using regex fallback instead. Re-run "
-                  "'python -m app.resume_ingest' to upgrade it.\n"
-                  f"Extracted {len(resume_skills)} skills: {', '.join(sorted(resume_skills))}\n")
+            print("No cached LLM skills found for this resume — matching will rely on "
+                  "regex fallback inside get_top_jobs. Re-run 'python -m app.resume_ingest' "
+                  "to upgrade it.\n")
 
-        # Pull a wider candidate pool via vector similarity first (cheap,
-        # pgvector-indexed), THEN apply the more expensive rubric scoring
-        # only on that shortlist — same two-stage pattern as the LLM
-        # reranking step planned for later.
-        candidates = get_top_jobs_by_similarity(conn, resume["embedding"], limit=100)
-
-        scored = []
-        for job in candidates:
-            job_text = f"{job['title']} {job['description'] or ''}"
-            kw_score = keyword_overlap_score(resume_skills, job_text)
-            sen_score = seniority_fit_score(job["seniority"])
-            dom_score = domain_fit_score(job["title"])
-            ai_score = ai_specificity_score(job["title"], job["description"] or "")
-            score = final_score(job["similarity"], kw_score, sen_score, dom_score, ai_score)
-            scored.append({**job, "keyword_score": kw_score, "seniority_score": sen_score,
-                            "domain_score": dom_score, "ai_specificity": ai_score, "final_score": score})
-
-        scored.sort(key=lambda j: j["final_score"], reverse=True)
+        # get_top_jobs already does the full 5-factor rubric, per-person role
+        # profile selection, already-applied-company demotion, and sub-role
+        # tagging — all the same logic app.tailor and the API use. No
+        # separate scoring loop here anymore.
+        scored = get_top_jobs(conn, resume, limit=100)
 
         EVAL_DIR.mkdir(exist_ok=True)
         csv_path = EVAL_DIR / "predictions.csv"
@@ -110,26 +65,31 @@ def main() -> None:
             writer = csv.writer(f)
             writer.writerow(["rank", "job_id", "company", "title", "seniority", "final_score",
                               "similarity", "keyword_score", "seniority_score", "domain_score",
-                              "ai_specificity", "url", "relevant"])
+                              "ai_specificity", "already_applied_company", "sub_role_tags",
+                              "url", "relevant"])
             for i, job in enumerate(scored, start=1):
                 # 'relevant' column left blank on purpose — you fill in 1 or 0
                 # by hand after reviewing each listing. That's the eval harness.
-                writer.writerow([i, job["id"], job["company"], job["title"], job["seniority"],
-                                  f"{job['final_score']:.3f}", f"{job['similarity']:.3f}",
-                                  f"{job['keyword_score']:.3f}", f"{job['seniority_score']:.3f}",
-                                  f"{job['domain_score']:.3f}", f"{job['ai_specificity']:.3f}",
-                                  job["url"], ""])
+                writer.writerow([
+                    i, job["id"], job["company"], job["title"], job["seniority"],
+                    f"{job['final_score']:.3f}", f"{job['similarity']:.3f}",
+                    f"{job['keyword_score']:.3f}", f"{job['seniority_score']:.3f}",
+                    f"{job['domain_score']:.3f}", f"{job['ai_specificity']:.3f}",
+                    job["already_applied_company"], ";".join(job["sub_role_tags"]),
+                    job["url"], "",
+                ])
         print(f"Full ranked list ({len(scored)} jobs) written to {csv_path}\n")
 
-        print(f"Top {TOP_N} matches (of {len(candidates)} candidates considered):\n")
+        print(f"Top {TOP_N} matches (of {len(scored)} candidates considered):\n")
         for i, job in enumerate(scored[:TOP_N], start=1):
-            matches = matched_skills(resume_skills, f"{job['title']} {job['description'] or ''}")
-            print(f"{i}. [{job['final_score']:.2f}] {job['title']} — {job['company']} ({job['seniority']})")
+            tags = f" [{', '.join(job['sub_role_tags'])}]" if job["sub_role_tags"] else ""
+            applied_note = " (already applied to this company)" if job["already_applied_company"] else ""
+            print(f"{i}. [{job['final_score']:.2f}] {job['title']} — {job['company']} ({job['seniority']}){tags}{applied_note}")
             print(f"   similarity={job['similarity']:.2f}  keyword_overlap={job['keyword_score']:.2f}  "
                   f"seniority_fit={job['seniority_score']:.2f}  domain_fit={job['domain_score']:.2f}  "
                   f"ai_specificity={job['ai_specificity']:.2f}")
-            if matches:
-                print(f"   matched skills: {', '.join(matches)}")
+            if job["matched_skills"]:
+                print(f"   matched skills: {', '.join(job['matched_skills'])}")
             print(f"   {job['url']}\n")
 
     finally:
