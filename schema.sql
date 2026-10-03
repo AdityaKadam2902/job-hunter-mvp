@@ -79,3 +79,5 @@ CREATE TABLE IF NOT EXISTS applications (
 );
 
 CREATE INDEX IF NOT EXISTS idx_applications_status ON applications (status);
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS eligibility_excluded BOOLEAN DEFAULT false;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS eligibility_reason TEXT;
