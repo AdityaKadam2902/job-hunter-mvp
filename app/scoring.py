@@ -122,6 +122,7 @@ def final_score(similarity: float, keyword_score: float, seniority_score: float,
                  domain_score: float, ai_specificity: float) -> float:
     return ((0.3 * similarity) + (0.3 * keyword_score) + (0.15 * seniority_score)
             + (0.15 * domain_score) + (0.1 * ai_specificity))
+            
 
 def resolve_resume_skills(resume: dict) -> set[str]:
     cached = resume.get("skills")
