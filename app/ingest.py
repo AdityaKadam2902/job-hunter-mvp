@@ -83,9 +83,10 @@ def fetch_all() -> list[JobRecord]:
 
     # --- RemoteOK: NOT filtered, already searched by tag ---
     for tag in REMOTEOK_TAGS:
-        jobs = remoteok.fetch_jobs(tag)
-        print(f"[remoteok] tag '{tag}': {len(jobs)} jobs")
-        records.extend(jobs)
+        raw_jobs = remoteok.fetch_jobs(tag)
+        filtered = [j for j in raw_jobs if is_relevant_title(j.title, relevance_markers)]
+        print(f"[remoteok] tag '{tag}': {len(raw_jobs)} jobs, {len(filtered)} kept")
+        records.extend(filtered)
 
     # --- Adzuna: filtered — evidence from a real run showed Adzuna's
     # search is broad full-text matching, not title-precise, so results
