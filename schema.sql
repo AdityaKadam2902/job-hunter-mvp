@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     -- dedup + freshness
     content_hash    TEXT NOT NULL UNIQUE,        -- hash of title+company+description
     posted_at       TIMESTAMPTZ,
+    closed_at       TIMESTAMPTZ,
+    is_duplicate_of UUID REFERENCES jobs(id),
     scraped_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_seen_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
 
@@ -81,3 +83,6 @@ CREATE TABLE IF NOT EXISTS applications (
 CREATE INDEX IF NOT EXISTS idx_applications_status ON applications (status);
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS eligibility_excluded BOOLEAN DEFAULT false;
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS eligibility_reason TEXT;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS closed_at TIMESTAMPTZ;
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS is_duplicate_of UUID REFERENCES jobs(id);
+CREATE INDEX IF NOT EXISTS idx_jobs_closed_at ON jobs (closed_at) WHERE closed_at IS NOT NULL;

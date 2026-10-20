@@ -21,6 +21,8 @@ from app.companies import (
 )
 from app.connectors import adzuna, ashby, greenhouse, lever, remoteok, smartrecruiters, workday
 from app.db import get_raw_conn
+from app.closed_jobs import mark_closed_jobs, track_pull
+from app.dedup import find_and_mark_duplicates
 from app.embeddings import embed_text
 from app.normalize import JobRecord, utcnow
 from app.relevance_filter import build_shared_relevance_markers, is_relevant_title
@@ -42,21 +44,24 @@ def fetch_all() -> list[JobRecord]:
     relevance_markers = build_shared_relevance_markers()
 
     # --- Greenhouse ---
-    for slug in GREENHOUSE_COMPANIES:
+    for slug in GREENHOUSE_COMPANIES + _discovered.get("greenhouse", []):
         raw_jobs = greenhouse.fetch_jobs(slug)
+        track_pull(raw_jobs)
         filtered = [j for j in raw_jobs if is_relevant_title(j.title, relevance_markers)]
         print(f"[greenhouse] {slug}: {len(raw_jobs)} jobs, {len(filtered)} kept")
         records.extend(filtered)
 
     # --- Lever ---
-    for slug in LEVER_COMPANIES:
+    for slug in LEVER_COMPANIES + _discovered.get("lever", []):
         raw_jobs = lever.fetch_jobs(slug)
+        track_pull(raw_jobs)
         filtered = [j for j in raw_jobs if is_relevant_title(j.title, relevance_markers)]
         print(f"[lever] {slug}: {len(raw_jobs)} jobs, {len(filtered)} kept")
         records.extend(filtered)
 
     # --- Ashby ---
     for slug in ASHBY_COMPANIES:
+        track_pull(raw_jobs)
         raw_jobs = ashby.fetch_jobs(slug)
         filtered = [j for j in raw_jobs if is_relevant_title(j.title, relevance_markers)]
         print(f"[ashby] {slug}: {len(raw_jobs)} jobs, {len(filtered)} kept")
@@ -168,6 +173,9 @@ def main() -> None:
 
         conn.commit()
         print(f"Done. {embedded_count} new jobs embedded and stored.")
+        closed_count = mark_closed_jobs(conn)
+        dup_count = find_and_mark_duplicates(conn)
+        print(f"[lifecycle] {closed_count} closed, {dup_count} duplicates marked")
     finally:
         conn.close()
 

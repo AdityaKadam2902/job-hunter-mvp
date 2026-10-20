@@ -21,8 +21,11 @@ from app.scoring import (
     get_sub_role_tags,
     keyword_overlap_score,
     matched_skills,
+    resolve_resume_skills,
     seniority_fit_score,
 )
+from app.freshness import recency_score
+from app.eligibility import compute_eligibility
 
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL = "openai/gpt-oss-120b"  # llama-3.3-70b-versatile was deprecated by Groq on 2026-06-17
@@ -100,7 +103,7 @@ def get_top_jobs(conn, resume: dict, limit: int):
     (from get_resume above) — not an internally re-queried 'active' one.
     Also attaches matched_skills and sub_role_tags for the frontend's
     'why this matches' explainability view."""
-    resume_skills = extract_resume_skills(resume["raw_text"])
+    resume_skills = resolve_resume_skills(resume)
     # Auto-selects the right marker set (AI/ML vs Data Analyst/etc) based
     # on WHOSE resume this is — no more manually editing role_config.py.
     profile = get_role_profile(resume.get("version_label"))
@@ -110,9 +113,12 @@ def get_top_jobs(conn, resume: dict, limit: int):
         cur.execute(
             """
             SELECT id, company, title, description, url, seniority, engagement_type,
+                   location, posted_at, scraped_at,
                    1 - (embedding <=> %s) AS similarity
             FROM jobs
             WHERE embedding IS NOT NULL
+              AND closed_at IS NULL
+              AND is_duplicate_of IS NULL
             ORDER BY embedding <=> %s
             LIMIT 100
             """,
@@ -122,7 +128,13 @@ def get_top_jobs(conn, resume: dict, limit: int):
         candidates = [dict(zip(cols, row)) for row in cur.fetchall()]
 
     scored = []
+    excluded_count = 0
     for job in candidates:
+        eligibility = compute_eligibility(job["description"] or "", job.get("location"), profile)
+        if eligibility["excluded"]:
+            excluded_count += 1
+            continue
+
         job_text = f"{job['title']} {job['description'] or ''}"
         kw_score = keyword_overlap_score(resume_skills, job_text)
         sen_score = seniority_fit_score(job["seniority"])
@@ -132,13 +144,13 @@ def get_top_jobs(conn, resume: dict, limit: int):
             profile["role_specific_markers"], profile["generic_adjacent_markers"],
         )
         score = final_score(job["similarity"], kw_score, sen_score, dom_score, ai_score)
+        score *= eligibility["multiplier"]
+        recency = recency_score(job.get("posted_at"), job["scraped_at"])
+        score *= recency
 
-        # Soft demotion, not exclusion — 0.7x for a company you've already
-        # applied to. A genuinely new role there could still surface, just
-        # won't dominate the top of the list the way a repeat listing was.
         is_new_company = job["company"].lower() not in applied_companies
         if not is_new_company:
-            score *= 0.4  # strengthened from 0.7 — evidence showed 0.7 wasn't enough to push repeat companies below genuinely new matches
+            score *= 0.4
 
         scored.append({
             **job,
@@ -147,12 +159,16 @@ def get_top_jobs(conn, resume: dict, limit: int):
             "seniority_score": sen_score,
             "domain_score": dom_score,
             "ai_specificity": ai_score,
+            "recency": recency,
+            "eligibility_reason": eligibility["reason"],
             "already_applied_company": not is_new_company,
             "matched_skills": matched_skills(resume_skills, job_text),
             "sub_role_tags": get_sub_role_tags(job["title"], profile["sub_role_tags"]),
         })
 
     scored.sort(key=lambda j: j["final_score"], reverse=True)
+    if excluded_count:
+        print(f"  [eligibility] {excluded_count} of {len(candidates)} candidates excluded")
     return scored[:limit]
 
 
